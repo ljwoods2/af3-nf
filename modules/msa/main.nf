@@ -4,45 +4,77 @@
 process filterMissingMSA {
     queue 'compute'
     executor "slurm"
-    tag "${type}_${name}"
+    tag "${proteinType}_${seq}"
     debug true
 
     input:
-    tuple val(name), val(seq), val(type)
+    tuple val(species), val(proteinType), val(seq), val(chain), val(name), val(proteinClass)
 
     output:
-    path "${name}.csv", optional: true
+    path "*.csv", optional: true
 
     script:
+    def chain_arg = chain ? "--chain ${chain}" : ""
+    def name_arg = name ? "--name ${name}" : ""
+    def class_arg = name ? "--protein_class ${proteinClass}" : ""
     """
-    python ${workflow.projectDir}/modules/msa/filter_missing_msa.py \\
-        -n "$name" \\
-        -s "$seq" \\
-        -db "$params.msa_db" \\
-        -t "$type" > "${name}.csv"
+    module load singularity
+
+    fname=\$(uuidgen).csv
+
+    export SINGULARITYENV_VAST_S3_ACCESS_KEY_ID="\$VAST_S3_ACCESS_KEY_ID"
+    export SINGULARITYENV_VAST_S3_SECRET_ACCESS_KEY="\$VAST_S3_SECRET_ACCESS_KEY"
+
+    singularity exec --nv \\
+        -B /home,/scratch,/tgen_labs --cleanenv \\
+        /tgen_labs/altin/alphafold3/containers/msa-db.sif \\
+        python ${workflow.projectDir}/modules/msa/filter_missing_msa.py \\
+            -t "$proteinType" \\
+            -s "$seq" \\
+            -sp "$species" \\
+            $chain_arg \\
+            $name_arg \\
+            $class_arg \\
+            -db "$params.msa_db" \\
+            -o "\$fname"
     """
 }
+
+    // . "/home/lwoods/miniconda3/etc/profile.d/conda.sh"
+    // conda activate vast-db
 
 process storeMSA {
     queue 'compute'
     executor "slurm"
-    tag "${type}_${name}"
+    tag "${proteinType}_${seq}"
     
     input:
-    tuple val(name), val(seq), val(type), path(json)
+    tuple val(species), val(proteinType), val(seq), val(chain), val(name), val(proteinClass), path(json)
 
     script:
     """
-    module load Python/3.7.4-GCCcore-8.3.0
+    module load singularity
 
-    python ${workflow.projectDir}/modules/msa/store_msa.py \\
-        -n "$name" \\
-        -s "$seq" \\
-        -i "$json" \\
-        -db "$params.msa_db" \\
-        -t "$type"
+    export SINGULARITYENV_VAST_S3_ACCESS_KEY_ID="\$VAST_S3_ACCESS_KEY_ID"
+    export SINGULARITYENV_VAST_S3_SECRET_ACCESS_KEY="\$VAST_S3_SECRET_ACCESS_KEY"
+    
+    singularity exec --nv \\
+        -B /home,/scratch,/tgen_labs --cleanenv \\
+        /tgen_labs/altin/alphafold3/containers/msa-db.sif \\
+        python ${workflow.projectDir}/modules/msa/store_msa.py \\
+            -t "$proteinType" \\
+            -s "$seq" \\
+            -sp "$species" \\
+            --chain "$chain" \\
+            --name "$name" \\
+            --protein_class "$proteinClass" \\
+            -db "$params.msa_db" \\
+            -j "$json"
     """
 }
+
+//    . "/home/lwoods/miniconda3/etc/profile.d/conda.sh"
+//     conda activate vast-db
 
 process runMSAAF3 {
     queue 'compute'
@@ -50,13 +82,13 @@ process runMSAAF3 {
     memory '64GB'
     executor "slurm"
     clusterOptions '--time=4:00:00'
-    tag "${type}_${name}"
+    tag "${proteinType}_${seq}"
 
     input:
-    tuple val(name), val(seq), val(type), path(json)
+    tuple val(species), val(proteinType), val(seq), val(chain), val(name), val(proteinClass), path(json)
 
     output:
-    tuple val(name), val(seq), val(type), path("*/*.json")
+    tuple val(species), val(proteinType), val(seq), val(chain), val(name), val(proteinClass), path("*/*.json")
 
     script:
     """

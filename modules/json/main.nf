@@ -1,24 +1,39 @@
 process generateSingleJSON {
     queue 'compute'
     executor "slurm"
-    tag "${type}_${name}"
+    tag "${proteinType}_${seq}"
 
     input:
-    tuple val(name), val(seq), val(type)
+    tuple val(species), val(proteinType), val(seq), val(chain), val(name), val(proteinClass)
 
     output:
-    tuple val(name), val(seq), val(type), path("*.json")
+    tuple val(species), val(proteinType), val(seq), val(chain), val(name), val(proteinClass), path("*.json")
 
     script:
     """
-    module load Python/3.7.4-GCCcore-8.3.0
+    module load singularity
 
-    python ${workflow.projectDir}/modules/json/generate_single_JSON.py \\
-        -n "$name" \\
-        -s "$seq" \\
-        -jn "${type}_${name}" 
+    fname=\$(uuidgen)
+
+    singularity exec --nv \\
+        -B /home,/scratch,/tgen_labs --cleanenv \\
+        /tgen_labs/altin/alphafold3/containers/msa-db.sif \\
+        python ${workflow.projectDir}/modules/json/generate_single_JSON.py \\
+            -s "$seq" \\
+            -jn "\$fname" 
     """
  }
+
+     // module load Python/3.7.4-GCCcore-8.3.0
+
+    // fname=\$(uuidgen)
+
+    // python ${workflow.projectDir}/modules/json/generate_single_JSON.py \\
+    //     -s "$seq" \\
+    //     -jn "\$fname" 
+
+
+
 
 process composeTriadJSON {
     queue 'compute'
@@ -27,36 +42,79 @@ process composeTriadJSON {
     // publishDir "${params.out_dir}/inference_input", mode: 'copy'
 
     input:
-    tuple   val(job_name), val(peptide),
-            val(mhc_1_type), val(mhc_1_name), val(mhc_1_seq), 
-            val(mhc_2_type), val(mhc_2_name), val(mhc_2_seq), 
-            val(tcr_1_type), val(tcr_1_name), val(tcr_1_seq), 
-            val(tcr_2_type), val(tcr_2_name), val(tcr_2_seq)
+    tuple   val(job_name), 
+            val(peptide),
+            val(mhc_1_seq), 
+            val(mhc_2_seq), 
+            val(tcr_1_seq), 
+            val(tcr_2_seq)
 
     output:
     tuple val(job_name), path("*.json")
 
     script:
     def peptide_msa = params.no_peptide ? '' : "-pm"
+    def seeds = params.seeds ? "--seeds ${params.seeds}" : ''
     """
-    module load Python/3.7.4-GCCcore-8.3.0
+    module load singularity
 
-    python ${workflow.projectDir}/modules/json/compose_triad_JSON.py \\
-        -jn "$job_name" \\
-        -p "$peptide" \\
-        ${peptide_msa} \\
-        -m1t "$mhc_1_type" \\
-        -m1n "$mhc_1_name" \\
-        -m1s "$mhc_1_seq" \\
-        -m2t "$mhc_2_type" \\
-        -m2n "$mhc_2_name" \\
-        -m2s "$mhc_2_seq" \\
-        -t1t "$tcr_1_type" \\
-        -t1n "$tcr_1_name" \\
-        -t1s "$tcr_1_seq" \\
-        -t2t "$tcr_2_type" \\
-        -t2n "$tcr_2_name" \\
-        -t2s "$tcr_2_seq" \\
-        -db "$params.msa_db"
+    export SINGULARITYENV_VAST_S3_ACCESS_KEY_ID="\$VAST_S3_ACCESS_KEY_ID"
+    export SINGULARITYENV_VAST_S3_SECRET_ACCESS_KEY="\$VAST_S3_SECRET_ACCESS_KEY"
+
+    singularity exec \\
+        -B /home,/scratch,/tgen_labs --cleanenv \\
+        /tgen_labs/altin/alphafold3/containers/msa-db.sif \\
+        python ${workflow.projectDir}/modules/json/compose_inference_JSON.py \\
+            -jn "$job_name" \\
+            -p "$peptide" \\
+            ${peptide_msa} \\
+            -m1s "$mhc_1_seq" \\
+            -m2s "$mhc_2_seq" \\
+            -t1s "$tcr_1_seq" \\
+            -t2s "$tcr_2_seq" \\
+            ${seeds} \\
+            -db "$params.msa_db"
+    """
+ }
+
+    //  . "/home/lwoods/miniconda3/etc/profile.d/conda.sh"
+    // conda activate vast-db
+
+
+process composePMHCJSON {
+    queue 'compute'
+    executor "slurm"
+    tag "$job_name"
+    // publishDir "${params.out_dir}/inference_input", mode: 'copy'
+
+    input:
+    tuple   val(job_name), 
+            val(peptide),
+            val(mhc_1_seq), 
+            val(mhc_2_seq)
+
+    output:
+    tuple val(job_name), path("*.json")
+
+    script:
+    def peptide_msa = params.no_peptide ? '' : "-pm"
+    def seeds = params.seeds ? "--seeds ${params.seeds}" : ''
+    """
+    module load singularity
+
+    export SINGULARITYENV_VAST_S3_ACCESS_KEY_ID="\$VAST_S3_ACCESS_KEY_ID"
+    export SINGULARITYENV_VAST_S3_SECRET_ACCESS_KEY="\$VAST_S3_SECRET_ACCESS_KEY"
+
+    singularity exec \\
+        -B /home,/scratch,/tgen_labs --cleanenv \\
+        /tgen_labs/altin/alphafold3/containers/msa-db.sif \\
+        python ${workflow.projectDir}/modules/json/compose_inference_JSON.py \\
+            -jn "$job_name" \\
+            -p "$peptide" \\
+            ${peptide_msa} \\
+            -m1s "$mhc_1_seq" \\
+            -m2s "$mhc_2_seq" \\
+            ${seeds} \\
+            -db "$params.msa_db"
     """
  }

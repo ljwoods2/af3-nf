@@ -14,9 +14,6 @@ def get_arguments():
         "-jn", "--job_name", type=str, required=True, help="Job name"
     )
     parser.add_argument(
-        "-n", "--name", type=str, required=True, help="Protein name"
-    )
-    parser.add_argument(
         "-s", "--seq", type=str, required=True, help="Protein sequence"
     )
     parser.add_argument(
@@ -33,7 +30,6 @@ def get_arguments():
 
 args = get_arguments()
 job_name = args.job_name
-protein_name = args.name
 sequence = args.seq
 id = args.protein_id
 

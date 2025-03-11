@@ -1,25 +1,33 @@
 /*
 Run AF3 MSA from CSV input
 */
+
+params.input_csv = null
+params.msa_db = null
+params.no_peptide = false
+
 include { filterMissingMSA } from './modules/msa'
 
 include { storeMSA; runMSAAF3 } from './modules/msa'
 
 include { generateSingleJSON } from './modules/json'
 
-params.input_csv = null
-params.out_dir = null
-params.msa_db = null
-params.no_peptide = false
 
-def buildChannel(csvFile, nameColumn, seqColumn, typeLabel) {
+def buildChannel(csvFile, proteinType, seqColumn, chainColumn, speciesColumn, nameColumn, classColumn) {
     return Channel.fromPath(csvFile)
         .splitCsv(header: true)
         .map { row -> 
-            row[nameColumn] ? tuple(row[nameColumn], row[seqColumn], (typeLabel == "peptide" ? "peptide" : row[typeLabel])) : null
+            if (proteinType == "tcr") {
+                tuple(row[speciesColumn], proteinType, row[seqColumn], row[chainColumn], null, null)
+            }
+            else if (proteinType == "mhc") {
+                tuple(row[speciesColumn], proteinType, row[seqColumn], row[chainColumn], row[nameColumn], row[classColumn])
+            }
+            else {
+                tuple(null, proteinType, row[seqColumn], null, null, null)
+            }
         }
-        .filter { it != null }
-        .distinct()
+        .unique()
 }
 
 workflow msaWorkflow {
@@ -28,10 +36,9 @@ workflow msaWorkflow {
 
     main:
     filt = filterMissingMSA(input_tuple).map { file -> 
-        def line = file.text.trim().split(",")
-        line.size() == 3 ? tuple (line[0], line[1], line[2]) : null
+            line = file.text.split(",")
+            tuple (line[0], line[1], line[2], line[3], line[4], line[5])
         }
-        .filter { it != null }
     json = generateSingleJSON(filt)
     msa = runMSAAF3(json)
     storeMSA(msa)
@@ -79,12 +86,12 @@ workflow peptide {
 
 
 workflow {
-    tcr1(buildChannel(params.input_csv, "tcr_1_name", "tcr_1_seq", "tcr_1_type"))
-    tcr2(buildChannel(params.input_csv, "tcr_2_name", "tcr_2_seq", "tcr_2_type"))
-    mhc1(buildChannel(params.input_csv, "mhc_1_name", "mhc_1_seq", "mhc_1_type"))
-    mhc2(buildChannel(params.input_csv, "mhc_2_name", "mhc_2_seq", "mhc_2_type"))
+    tcr1(buildChannel(params.input_csv, "tcr", "tcr_1_seq", "tcr_1_chain", "tcr_1_species", null, null))
+    tcr2(buildChannel(params.input_csv, "tcr", "tcr_2_seq", "tcr_2_chain", "tcr_2_species", null, null))
+    mhc1(buildChannel(params.input_csv, "mhc", "mhc_1_seq", "mhc_1_chain", "mhc_1_species", "mhc_1_name",  "mhc_class"))
+    mhc2(buildChannel(params.input_csv, "mhc", "mhc_2_seq", "mhc_2_chain", "mhc_2_species", "mhc_2_name",  "mhc_class"))
 
     if (params.no_peptide == false) {
-        peptide(buildChannel(params.input_csv, "peptide", "peptide", "peptide"))
+        peptide(buildChannel(params.input_csv, "peptide", "peptide", null, null, null, null))
     }
 }
