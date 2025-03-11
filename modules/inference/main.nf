@@ -1,7 +1,7 @@
 process batchedAlphaInference {
     queue 'gpu-a100'
     cpus '8'
-    clusterOptions '--nodes=1 --ntasks=1 --gres=gpu:1 --time=8:00:00'
+    clusterOptions '--nodes=1 --ntasks=1 --gres=gpu:1 --time=24:00:00'
     memory '64GB'
     executor "slurm"
     tag "$batch_name"

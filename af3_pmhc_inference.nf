@@ -28,7 +28,7 @@ workflow {
 
     triad_json = composePMHCJSON(triad_channel)
 
-    batched_triad_json = triad_json.collate(100)
+    batched_triad_json = triad_json.collate(50)
 
     batchname_batchdir = batched_triad_json.map { batch_list ->
 
