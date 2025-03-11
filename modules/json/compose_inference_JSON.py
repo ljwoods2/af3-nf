@@ -5,9 +5,36 @@ import json
 import sys
 import os
 import vastdb
+import fcntl
+from contextlib import contextmanager
 
 VAST_S3_ACCESS_KEY_ID = os.getenv("VAST_S3_ACCESS_KEY_ID")
 VAST_S3_SECRET_ACCESS_KEY = os.getenv("VAST_S3_SECRET_ACCESS_KEY")
+
+
+# https://gist.github.com/lonetwin/7b4ccc93241958ff6967
+@contextmanager
+def locked_open(filename, mode="r"):
+    """locked_open(filename, mode='r') -> <open file object>
+
+    Context manager that on entry opens the path `filename`, using `mode`
+    (default: `r`), and applies an advisory write lock on the file which
+    is released when leaving the context. Yields the open file object for
+    use within the context.
+    Note: advisory locking implies that all calls to open the file using
+    this same api will block for both read and write until the lock is
+    acquired. Locking this way will not prevent the file from access using
+    any other api/method.
+    """
+    if mode in ("r", "rb"):
+        lock = fcntl.LOCK_SH
+    else:
+        lock = fcntl.LOCK_EX
+
+    with open(filename, mode) as fd:
+        fcntl.flock(fd, lock)
+        yield fd
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 def get_msa(session, protein_type, seq, species=None):
@@ -15,6 +42,7 @@ def get_msa(session, protein_type, seq, species=None):
     Query the specified table for the msa JSON corresponding to the given name.
     Returns the parsed JSON object if found, otherwise None.
     """
+
     with session.transaction() as tx:
         bucket = tx.bucket("altindbs3")
         schema = bucket.schema("alphafold-3")
@@ -44,7 +72,9 @@ def get_msa(session, protein_type, seq, species=None):
                 f"Expected 1 row, got {result.shape[0]}"
             )
 
-        with open(result["msa_path"][0].as_py(), "r") as f:
+        # if currently being rewritten, wait to avoid
+        # reading incomplete data
+        with locked_open(result["msa_path"][0].as_py(), "r") as f:
             msa = json.load(f)
 
         return msa

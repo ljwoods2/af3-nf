@@ -6,11 +6,38 @@ import pyarrow as pa
 from datetime import date
 from pathlib import Path
 import hashlib
+import fcntl
+from contextlib import contextmanager
 
 VAST_S3_ACCESS_KEY_ID = os.getenv("VAST_S3_ACCESS_KEY_ID")
 VAST_S3_SECRET_ACCESS_KEY = os.getenv("VAST_S3_SECRET_ACCESS_KEY")
 
 EPOCH = date(1970, 1, 1)
+
+
+# https://gist.github.com/lonetwin/7b4ccc93241958ff6967
+@contextmanager
+def locked_open(filename, mode="r"):
+    """locked_open(filename, mode='r') -> <open file object>
+
+    Context manager that on entry opens the path `filename`, using `mode`
+    (default: `r`), and applies an advisory write lock on the file which
+    is released when leaving the context. Yields the open file object for
+    use within the context.
+    Note: advisory locking implies that all calls to open the file using
+    this same api will block for both read and write until the lock is
+    acquired. Locking this way will not prevent the file from access using
+    any other api/method.
+    """
+    if mode in ("r", "rb"):
+        lock = fcntl.LOCK_SH
+    else:
+        lock = fcntl.LOCK_EX
+
+    with open(filename, mode) as fd:
+        fcntl.flock(fd, lock)
+        yield fd
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 def read_json(json_path, seq):
@@ -63,96 +90,96 @@ def store_in_database(
 
     filepath = Path("/tgen_labs/altin/alphafold3/msa") / protein_type / fname
 
-    try:
+    with locked_open(filepath, "w+") as f:
+        try:
+            session = vastdb.connect(
+                endpoint=db_url,
+                access=VAST_S3_ACCESS_KEY_ID,
+                secret=VAST_S3_SECRET_ACCESS_KEY,
+                ssl_verify=False,
+            )
 
-        session = vastdb.connect(
-            endpoint=db_url,
-            access=VAST_S3_ACCESS_KEY_ID,
-            secret=VAST_S3_SECRET_ACCESS_KEY,
-            ssl_verify=False,
-        )
+            # manually perform an UPSERT
+            with session.transaction() as tx:
+                bucket = tx.bucket("altindbs3")
+                schema = bucket.schema("alphafold-3")
 
-        # manually perform an UPSERT
-        with session.transaction() as tx:
-            bucket = tx.bucket("altindbs3")
-            schema = bucket.schema("alphafold-3")
+                if protein_type == "tcr":
+                    table = schema.table("tcr_chain_msa")
+                    primary_key_name = "tcr_chain_msa_id"
+                    predicate = table["tcr_chain_msa_id"] == seq
 
-            if protein_type == "tcr":
-                table = schema.table("tcr_chain_msa")
-                primary_key_name = "tcr_chain_msa_id"
-                predicate = table["tcr_chain_msa_id"] == seq
+                    data = [
+                        [seq],
+                        [chain],
+                        [filepath.as_posix()],
+                        [is_empty],
+                        [date_val],
+                    ]
 
-                data = [
-                    [seq],
-                    [chain],
-                    [filepath.as_posix()],
-                    [is_empty],
-                    [date_val],
-                ]
+                    new_row = pa.table(schema=table.arrow_schema, data=data)
 
-                new_row = pa.table(schema=table.arrow_schema, data=data)
+                elif protein_type == "mhc":
+                    table = schema.table("mhc_chain_msa")
+                    primary_key_name = "mhc_chain_msa_id"
+                    predicate = (table["mhc_chain_msa_id"] == seq) & (
+                        table["species"] == species
+                    )
 
-            elif protein_type == "mhc":
-                table = schema.table("mhc_chain_msa")
-                primary_key_name = "mhc_chain_msa_id"
-                predicate = (table["mhc_chain_msa_id"] == seq) & (
-                    table["species"] == species
-                )
+                    data = [
+                        [seq],
+                        [name],
+                        [chain],
+                        [protein_class],
+                        [species],
+                        [filepath.as_posix()],
+                        [is_empty],
+                        [date_val],
+                    ]
+                    new_row = pa.table(schema=table.arrow_schema, data=data)
 
-                data = [
-                    [seq],
-                    [name],
-                    [chain],
-                    [protein_class],
-                    [species],
-                    [filepath.as_posix()],
-                    [is_empty],
-                    [date_val],
-                ]
-                new_row = pa.table(schema=table.arrow_schema, data=data)
+                elif protein_type == "peptide":
+                    table = schema.table("peptide_msa")
+                    primary_key_name = "peptide_msa_id"
+                    predicate = table["peptide_msa_id"] == seq
+                    data = [
+                        [seq],
+                        [filepath.as_posix()],
+                        [is_empty],
+                        [date_val],
+                    ]
+                    new_row = pa.table(
+                        schema=table.arrow_schema,
+                        data=data,
+                    )
+                else:
+                    raise ValueError
 
-            elif protein_type == "peptide":
-                table = schema.table("peptide_msa")
-                primary_key_name = "peptide_msa_id"
-                predicate = table["peptide_msa_id"] == seq
-                data = [
-                    [seq],
-                    [filepath.as_posix()],
-                    [is_empty],
-                    [date_val],
-                ]
-                new_row = pa.table(
-                    schema=table.arrow_schema,
-                    data=data,
-                )
-            else:
-                raise ValueError
+                # first SELECT
+                result = table.select(
+                    columns=[primary_key_name],
+                    predicate=predicate,
+                    internal_row_id=True,
+                ).read_all()
 
-            # first SELECT
-            result = table.select(
-                columns=[primary_key_name],
-                predicate=predicate,
-                internal_row_id=True,
-            ).read_all()
+                # either insert or update
+                if result.shape[0] == 0:
+                    table.insert(new_row)
+                else:
 
-            # either insert or update
-            if result.shape[0] == 0:
-                table.insert(new_row)
-            else:
+                    schema = pa.schema(
+                        [pa.field("$row_id", pa.uint64())]
+                        + list(table.arrow_schema)
+                    )
+                    data = [[result["$row_id"][0]]] + data
+                    updated_row = pa.table(schema=schema, data=data)
+                    table.update(updated_row)
 
-                schema = pa.schema(
-                    [pa.field("$row_id", pa.uint64())]
-                    + list(table.arrow_schema)
-                )
-                data = [[result["$row_id"][0]]] + data
-                updated_row = pa.table(schema=schema, data=data)
-                table.update(updated_row)
-
-        with open(filepath, "w") as f:
             f.write(msa_json)
+            f.flush()
 
-    except Exception as e:
-        raise ConnectionError(f"Error connecting to database: {e}")
+        except Exception as e:
+            raise ConnectionError(f"Error connecting to database: {e}")
 
 
 if __name__ == "__main__":
