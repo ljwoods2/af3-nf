@@ -8,6 +8,8 @@ params.out_dir = null
 params.msa_db = null
 params.no_peptide = false
 params.seeds = null
+params.collate = 50
+params.compress = false
 
 include { composePMHCJSON } from './modules/json'
 include { batchedAlphaInference } from './modules/inference'
@@ -28,18 +30,26 @@ workflow {
 
     triad_json = composePMHCJSON(triad_channel)
 
-    batched_triad_json = triad_json.collate(50)
+    batched_triad_json = triad_json.map{
+        triad_json_tuples -> triad_json_tuples[1]
+    }.collate(params.collate)
 
-    batchname_batchdir = batched_triad_json.map { batch_list ->
+    // batchname_batchdir = batched_triad_json.flatMap { batch_list ->
+        
+    //     def jsonFiles = batch_list.collect { tuple -> tuple[1] }
+        
+    //     // def uniqueDirName = "batch_${UUID.randomUUID().toString()}/"
+        
+    //     Channel.from(jsonFiles).collectFile()
+    // }.map { batchDir ->
+    //     tuple(batchDir.getName(), batchDir.getTempDir())
+    // }
 
-        def batch_dir = file("${workflow.workDir}/batch_${UUID.randomUUID().toString()}")
-        batch_dir.mkdirs()
+    batchdir_proc = batchedAlphaInference(batched_triad_json)
 
-        batch_list.each { tuple ->
-            def (job_name, json_path) = tuple
-            json_path.copyTo(batch_dir)
-        }
-        tuple(batch_dir.getName(), batch_dir)
+    unbatched_inference_dir = batchdir_proc.flatten()
+
+    if (params.compress == true) {
+        cleanInferenceDir(unbatched_inference_dir)
     }
-    batchedAlphaInference(batchname_batchdir)
 }
