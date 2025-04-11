@@ -12,8 +12,7 @@ params.collate = 50
 params.compress = false
 
 include { composePMHCJSON } from './modules/json'
-include { batchedAlphaInference } from './modules/inference'
-
+include { batchedAlphaInference; cleanInferenceDir } from './modules/inference'
 
 workflow {
 
