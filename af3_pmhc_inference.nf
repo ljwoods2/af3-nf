@@ -10,6 +10,7 @@ params.no_peptide = false
 params.seeds = null
 params.collate = 50
 params.compress = false
+params.check_inf_exists = false
 
 include { composePMHCJSON } from './modules/json'
 include { batchedAlphaInference; cleanInferenceDir } from './modules/inference'

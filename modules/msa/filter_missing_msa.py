@@ -30,14 +30,16 @@ def is_msa_stored(protein_type, seq, species, db_url):
 
             elif protein_type == "mhc":
                 table = schema.table("mhc_chain_msa")
-                predicate = (table["mhc_chain_msa_id"] == seq) & (
-                    table["species"] == species
-                )
+                predicate = table["mhc_chain_msa_id"] == seq
                 primary_key_name = "mhc_chain_msa_id"
             elif protein_type == "peptide":
                 table = schema.table("peptide_msa")
                 predicate = table["peptide_msa_id"] == seq
                 primary_key_name = "peptide_msa_id"
+            elif protein_type == "any":
+                table = schema.table("any_msa")
+                predicate = table["any_msa_id"] == seq
+                primary_key_name = "any_msa_id"
             else:
                 raise ValueError
 
@@ -106,5 +108,5 @@ if __name__ == "__main__":
 
         with open(args.output, "a") as f:
             f.write(
-                f"{args.species},{args.protein_type},{args.seq},{chain},{name},{protein_class}"
+                f"{species},{args.protein_type},{args.seq},{chain},{name},{protein_class}"
             )

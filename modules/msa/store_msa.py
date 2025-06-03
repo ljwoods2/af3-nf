@@ -152,6 +152,20 @@ def store_in_database(
                         schema=table.arrow_schema,
                         data=data,
                     )
+                elif protein_type == "any":
+                    table = schema.table("any_msa")
+                    primary_key_name = "any_msa_id"
+                    predicate = table["any_msa_id"] == seq
+                    data = [
+                        [seq],
+                        [filepath.as_posix()],
+                        [is_empty],
+                        [date_val],
+                    ]
+                    new_row = pa.table(
+                        schema=table.arrow_schema,
+                        data=data,
+                    )
                 else:
                     raise ValueError
 

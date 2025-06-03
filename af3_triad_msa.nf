@@ -16,6 +16,10 @@ include { generateSingleJSON } from './modules/json'
 def buildChannel(csvFile, proteinType, seqColumn, chainColumn, speciesColumn, nameColumn, classColumn) {
     return Channel.fromPath(csvFile)
         .splitCsv(header: true)
+        .filter { row ->
+            def seq = row[seqColumn]
+            seq != null && seq.trim()
+        }
         .map { row -> 
             if (proteinType == "tcr") {
                 tuple(row[speciesColumn], proteinType, row[seqColumn], row[chainColumn], null, null)

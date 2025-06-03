@@ -59,6 +59,10 @@ def get_msa(session, protein_type, seq, species=None):
             table = schema.table("peptide_msa")
             predicate = table["peptide_msa_id"] == seq
 
+        elif protein_type == "any":
+            table = schema.table("any_msa")
+            predicate = table["any_msa_id"] == seq
+
         else:
             raise ValueError
 
@@ -96,13 +100,13 @@ def main():
         action="store_true",
         help="Use peptide MSA",
     )
-    # parser.add_argument(
-    #     "-ms",
-    #     "--mhc_species",
-    #     type=str,
-    #     required=False,
-    #     help="MHC species of origin",
-    # )
+    parser.add_argument(
+        "-pt",
+        "--protein_type",
+        type=str,
+        required=False,
+        help="Protein type (MSA subdir) if using script for a single chain",
+    )
     parser.add_argument(
         "-m1s", "--mhc_1_seq", type=str, required=False, help="MHC 1 sequence"
     )
@@ -143,7 +147,8 @@ def main():
     msas = []
     if args.peptide:
         if args.peptide_msa:
-            peptide_msa = get_msa(session, "peptide", args.peptide)
+            ptype = "peptide" if args.protein_type else args.protein_type
+            peptide_msa = get_msa(session, ptype, args.peptide)
             peptide_msa["id"] = "A"
             peptide_msa = {"protein": peptide_msa}
             # peptide_msa["protein"].update({"id": "A"})
